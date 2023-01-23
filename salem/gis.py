@@ -861,11 +861,11 @@ class Grid(object):
                     out_data[dimj, dimi, ...] = tmp
 
         # prepare output
-        #if method is len:
-        #    out_data[~np.isfinite(out_data)] = 0
-        #    out_data = out_data.astype(int)
-        #else:
-        #    out_data = np.ma.masked_invalid(out_data)
+        if method is len:
+            out_data[~np.isfinite(out_data)] = np.nan
+            out_data = out_data.astype(int)
+        else:
+            out_data = np.ma.masked_invalid(out_data)
         
         if return_lut:
             return out_data, lut
