@@ -780,8 +780,8 @@ class Grid(object):
             ij = divmod(ri-1, self.nx)
             out[ij] = np.stack((j[idx], i[idx]), axis=1)
         return out
-
-    def lookup_transform(self, data, grid=None, method=np.mean, lut=None,
+    
+    def lookup_transform_len(self, data, grid=None, method=len, lut=None,
                          return_lut=False):
         """Performs the forward transformation of gridded data into self.
 
@@ -867,6 +867,97 @@ class Grid(object):
         else:
             out_data = np.ma.masked_invalid(out_data)
 
+        if return_lut:
+            return out_data, lut
+        else:
+            return out_data
+    def lookup_transform(self, data, grid=None, method=np.mean, lut=None,
+                         return_lut=False):
+        """Performs the forward transformation of gridded data into self.
+
+        This method is suitable when the data grid is of higher resolution
+        than ``self``. ``lookup_transform`` performs aggregation of data
+        according to a user given rule (e.g. ``np.mean``, ``len``, ``np.std``),
+        applied to all grid points found below a grid point in ``self``.
+
+
+        See also :py:meth:`Grid.grid_lookup` and examples in the docs
+
+        Parameters
+        ----------
+        data : ndarray
+            an ndarray of dimensions 2, 3, or 4, the two last ones being y, x.
+        grid : Grid
+            a Grid instance matching the data
+        method : function, default: np.mean
+            the aggregation method. Possibilities: np.std, np.median, np.sum,
+            and more. Use ``len`` to count the number of grid points!
+        lut : ndarray, optional
+            computing the lookup table can be expensive. If you have several
+            operations to do with the same grid, set ``lut`` to an existing
+            table obtained from a previous call to  :py:meth:`Grid.grid_lookup`
+        return_lut : bool, optional
+            set to True if you want to return the lookup table for later use.
+            in this case, returns a tuple
+
+        Returns
+        -------
+        An aggregated ndarray of the data, in ``self`` coordinates.
+        If ``return_lut==True``, also return the lookup table
+        """
+
+        # Input checks
+        if grid is None:
+            grid = check_crs(data)  # xarray
+        if not isinstance(grid, Grid):
+            raise ValueError('grid should be a Grid instance')
+        if hasattr(data, 'values'):
+            data = data.values  # xarray
+
+        # dimensional check
+        in_shape = data.shape
+        ndims = len(in_shape)
+        if (ndims < 2) or (ndims > 4):
+            raise ValueError('data dimension not accepted')
+        if (in_shape[-1] != grid.nx) or (in_shape[-2] != grid.ny):
+            raise ValueError('data dimension not compatible')
+
+        if lut is None:
+            lut = self.grid_lookup(grid)
+
+        # Prepare the output
+        out_shape = list(in_shape)
+        out_shape[-2:] = [self.ny, self.nx]
+
+        if data.dtype.kind == 'i':
+            out_data = np.zeros(out_shape, dtype=float) * np.NaN
+        else:
+            out_data = np.zeros(out_shape, dtype=data.dtype) * np.NaN
+
+        def _2d_trafo(ind, outd):
+            for ji, l in lut.items():
+                outd[ji] = method(ind[l[:, 0], l[:, 1]])
+            return outd
+
+        if ndims == 2:
+            _2d_trafo(data, out_data)
+        if ndims == 3:
+            for dimi, cdata in enumerate(data):
+                out_data[dimi, ...] = _2d_trafo(cdata, out_data[dimi, ...])
+        if ndims == 4:
+            for dimj, cdata in enumerate(data):
+                for dimi, ccdata in enumerate(cdata):
+                    tmp = _2d_trafo(ccdata, out_data[dimj, dimi, ...])
+                    out_data[dimj, dimi, ...] = tmp
+
+        # prepare output
+        #if method is len:
+        #    out_data[~np.isfinite(out_data)] = 0
+        #    out_data = out_data.astype(int)
+        #else:
+            #out_data = np.ma.masked_invalid(out_data)
+        out_data = np.ma.masked_invalid(out_data)
+        
         if return_lut:
             return out_data, lut
         else:
